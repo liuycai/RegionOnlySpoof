@@ -83,6 +83,15 @@ and enable:
 Allow user management of kernel extensions from identified developers
 ```
 
+This is Apple's UI wording for the Startup Security Utility option. RegionOnlySpoof itself is ad-hoc signed:
+
+```text
+Signature=adhoc
+TeamIdentifier=not set
+```
+
+It does not carry an identified Developer ID KEXT certificate.
+
 Do NOT select Permissive Security.
 
 Do NOT disable authenticated-root protection.
@@ -99,7 +108,18 @@ csrutil enable --without kext
 
 This creates a custom SIP configuration.
 
-The validated configuration kept important protections including filesystem protections and authenticated root while disabling the KEXT-signing-related protection required by this experiment.
+On the validated macOS 26.6.2 system, `csrutil status` reported:
+
+```text
+Kext Signing: disabled
+Kernel Integrity Protections: disabled
+Filesystem Protections: enabled
+Authenticated Root Requirement: enabled
+```
+
+Both Kext Signing and Kernel Integrity Protections were disabled, while Filesystem Protections and Authenticated Root Requirement remained enabled. This materially weakens the default macOS security state.
+
+The resulting SIP flags may differ across macOS versions. Always recheck both `csrutil status` and `csrutil authenticated-root status` after changing the security policy or updating macOS.
 
 After reboot:
 

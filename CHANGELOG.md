@@ -2,6 +2,15 @@
 
 All notable changes to RegionOnlySpoof will be documented here.
 
+## [1.0.1] - 2026-09-09
+
+### Documentation-only security clarification
+
+- Clarified that `csrutil enable --without kext` on the tested macOS 26.6.2 system disabled both Kext Signing and Kernel Integrity Protections, while Filesystem Protections and Authenticated Root Requirement remained enabled.
+- Explained that this weakens multiple kernel-related protections and that different macOS versions require checking `csrutil status` and `csrutil authenticated-root status` again.
+- Clarified the ad-hoc signature (`Signature=adhoc`, `TeamIdentifier=not set`) and that "identified developers" is Apple's Startup Security Utility wording, not evidence of an identified Developer ID KEXT certificate for this project.
+- No source-code or runtime-behavior changes. The KEXT implementation is identical to v1.0.0.
+
 ## [1.0.0] - 2026-09-09
 
 ### Added

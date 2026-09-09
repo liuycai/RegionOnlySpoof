@@ -23,9 +23,46 @@ Apple Silicon Macs normally prevent an ad-hoc KEXT like this from loading.
 
 The validated experiment required Reduced Security and a custom partial SIP configuration.
 
-That means the machine is not running Apple's normal default security policy.
+On the tested macOS 26.6.2 system, after running:
 
-This materially reduces system security.
+```bash
+csrutil enable --without kext
+```
+
+`csrutil status` reported:
+
+```text
+Kext Signing: disabled
+Kernel Integrity Protections: disabled
+Filesystem Protections: enabled
+Authenticated Root Requirement: enabled
+```
+
+This lowers multiple kernel-related protections, beyond permitting a single third-party KEXT, and materially weakens the default macOS security state.
+
+The resulting SIP flags may differ across macOS versions. Always verify the actual state after changing the security policy:
+
+```bash
+csrutil status
+csrutil authenticated-root status
+```
+
+## Ad-hoc signature clarification
+
+RegionOnlySpoof is ad-hoc signed. The validated KEXT reported:
+
+```text
+Signature=adhoc
+TeamIdentifier=not set
+```
+
+The Startup Security Utility option:
+
+```text
+Allow user management of kernel extensions from identified developers
+```
+
+is Apple's UI wording. It does not mean RegionOnlySpoof carries an identified Developer ID KEXT certificate.
 
 ## Security boundaries this project does not require disabling
 
