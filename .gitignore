@@ -1,0 +1,23 @@
+.DS_Store
+
+# Build output
+build/
+*.o
+
+# KEXT build artifacts
+*.kext/
+*.dSYM/
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
+
+# Xcode
+DerivedData/
+xcuserdata/
+*.xcuserstate
