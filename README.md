@@ -1,294 +1,63 @@
-# RegionOnlySpoof
+# RegionOnlySpoof v1.2.0
 
-Minimal Apple Silicon `region-info` runtime spoof experiment.
+Apple Silicon runtime-region experiment with an optional, once-per-boot eligibility refresh helper.
 
-> This project changes one property only:
->
-> `IOPlatformExpertDevice.region-info`
->
-> from `CH/A` to `LL/A` at runtime.
->
-> It intentionally does **not** modify `country-of-origin` or other Apple Intelligence eligibility inputs.
+**Release/helper version: 1.2.0. KEXT version: 1.0.2.** These are separate version numbers. This release changes the earlier region-only experiment: the KEXT now writes both `region-info = LL/A` and `country-of-origin = USA`, and publishes a diagnostic completion marker.
 
-## Why this project exists
+## What changed
 
-Some mainland-China Mac hardware reports:
+On the tested macOS 27.2 system, eligibility input initialization could precede the KEXT region write. The original eligibility process retained a rejected device-region input after the IORegistry properties changed. Rebuilding that process after the driver completed initialization restored qualification.
+
+The helper registers an IOKit `IOServiceFirstPublish` notification for `com_local_RegionOnlySpoof`, drains already-published services, and checks the `RegionOnlySpoofTiming` completion marker. It then performs at most one eligibility-service rebuild per boot:
 
 ```text
-country-of-origin = CHN
-region-info       = CH/A
+Driver writes properties and completion marker
+  -> registerService()
+  -> helper observes published service + complete marker
+  -> verify process identity and persist per-boot attempt
+  -> one SIGTERM to eligibilityd, if running
+  -> demand-start notification, if needed
+  -> verify new PID and qualification; exit
 ```
 
-On a tested Apple Silicon Mac running macOS 26.6.2, `CH/A` caused:
+There is no fixed 20-second delay and no `kmutil` polling. Region strings and existing qualification answers do not gate the rebuild. A missing completion marker times out without sending a signal. No continuous monitor, SIGKILL loop, language change, account change, network change, or direct edit of Apple's qualification files is performed.
 
-```text
-OS_ELIGIBILITY_INPUT_DEVICE_REGION_CODE = 2
-```
+## Quick start
 
-This project was created to test a single-variable hypothesis:
-
-> Is changing only `region-info` from `CH/A` to `LL/A` sufficient to change Apple's device-region eligibility result?
-
-The answer on the validated system was **yes**.
-
-## Design principle
-
-RegionOnlySpoof deliberately performs the smallest possible runtime modification.
-
-It changes:
-
-```text
-region-info:
-CH/A -> LL/A
-```
-
-It does NOT change:
-
-```text
-country-of-origin
-eligibility.plist
-countryd
-GeoServices
-Siri configuration
-AppleInternalVariant
-FeatureFlags
-DNS
-hosts
-proxy settings
-network routing
-Apple Account region
-```
-
-There is no LaunchDaemon and no background script that modifies these services.
-
-## Runtime behavior
-
-The kernel extension matches:
-
-```text
-IOPlatformExpertDevice
-```
-
-and performs one relevant property write:
-
-```cpp
-provider->setProperty("region-info", regionData);
-```
-
-The `OSData` payload is 32 bytes long and begins with:
-
-```text
-LL/A
-```
-
-The original:
-
-```text
-country-of-origin = CHN
-```
-
-remains unchanged.
-
-## Verified result
-
-Validation platform:
-
-| Item | Value |
-|---|---|
-| Machine | MacBook Pro |
-| Model Identifier | Mac17,9 |
-| SoC | Apple M5 Pro |
-| Memory | 24 GB |
-| Model Number | MGDN4CH/A |
-| macOS | 26.6.2 |
-| Build | 25G83 |
-| Test date | 2026-09-09 |
-
-### IORegistry
-
-| Property | Before | After |
-|---|---|---|
-| `region-info` | `CH/A` | `LL/A` |
-| `country-of-origin` | `CHN` | `CHN` |
-
-### Eligibility
-
-| Eligibility input/domain | Before | After |
-|---|---:|---:|
-| `DEVICE_REGION_CODE` | 2 | 3 |
-| `FOUNDATION_MODELS` | 2 | 4 |
-| `PERSONAL_QA` | 2 | 4 |
-| `SIRI_WITH_APP_INTENTS` | 2 | 4 |
-
-After changing the macOS device language to English and Siri to `en-US`:
-
-| Eligibility input/domain | Before alignment | After alignment |
-|---|---:|---:|
-| `DEVICE_AND_SIRI_LANGUAGE_MATCH` | 2 | 3 |
-| `SIRI_LANGUAGE` | 3 | 3 |
-| `GREYMATTER` | 2 | 4 |
-
-The runtime availability log subsequently reported:
-
-```text
-isDeviceEligible: true
-isAppleIntelligenceToggleEnabled: true
-```
-
-and feature access included:
-
-```text
-cloud.llm
-ai.paperkit.image-generation
-ai.keyboard.emoji-generation
-ai.apps.image-playground
-```
-
-See [VALIDATION.md](VALIDATION.md) for details.
-
-## Important observation
-
-During the successful test:
-
-```text
-COUNTRY_LOCATION = 2
-```
-
-remained unchanged.
-
-Nevertheless:
-
-```text
-FOUNDATION_MODELS = 4
-PERSONAL_QA = 4
-SIRI_WITH_APP_INTENTS = 4
-GREYMATTER = 4
-```
-
-on this specific macOS build.
-
-This suggests that `COUNTRY_LOCATION = 2` was not a hard blocker for those domains in this tested configuration.
-
-This is an experimental observation, not a statement about all macOS versions.
-
-## Security requirements
-
-This project uses a legacy macOS kernel extension.
-
-On Apple Silicon, loading an ad-hoc signed KEXT may require:
-
-- Reduced Security
-- user management of kernel extensions
-- a custom partial SIP configuration
-
-The validated configuration used:
+Read [SECURITY.md](SECURITY.md), then [BUILD.md](BUILD.md) and [INSTALL.md](INSTALL.md). Existing users already running the completion-marker KEXT 1.0.2 can install only the helper:
 
 ```bash
-csrutil enable --without kext
+sudo /usr/bin/python3 -I autorefresh/setup.py install
+/usr/bin/python3 -I autorefresh/setup.py status
 ```
 
-On the validated macOS 26.6.2 system, `csrutil status` reported both:
+The helper is copied to the system volume; boot execution does not depend on this checkout staying mounted. Installation immediately invokes it. If this boot already has an attempt record, the invocation skips safely.
 
-```text
-Kext Signing: disabled
-Kernel Integrity Protections: disabled
-```
-
-while the following protections remained enabled:
-
-```text
-Filesystem Protections: enabled
-Authenticated Root Requirement: enabled
-```
-
-The exact resulting SIP flags may vary across macOS versions. Always check the actual state with both commands after changing the security policy:
+Uninstall the helper with:
 
 ```bash
-csrutil status
-csrutil authenticated-root status
+sudo /usr/bin/python3 -I autorefresh/setup.py uninstall
 ```
 
-The Startup Security Utility option named:
+See [UNINSTALL.md](UNINSTALL.md) for full KEXT removal and restoration.
 
-```text
-Allow user management of kernel extensions from identified developers
-```
+## Validation
 
-is Apple's UI wording. RegionOnlySpoof itself is ad-hoc signed (`Signature=adhoc`, `TeamIdentifier=not set`) and does not carry an identified Developer ID KEXT certificate.
+One macOS 27.2 / build 26B123 Apple Silicon system was tested. The 1.2.0 boot restored device-region qualification and GREYMATTER, FOUNDATION_MODELS and AMERICIUM eligibility. Observed boot-to-confirmation time was **15.564 seconds**, versus **69.342 seconds** in a separate 1.1.0 boot. This is one observation per version, not a statistical performance guarantee.
 
-See [SECURITY.md](SECURITY.md) before attempting installation.
+The successful 1.2.0 boot used the already-published service path. Later-publication callback handling is covered by simulated tests, not a separate live boot observation. Eligibility passing does not establish that model downloads or all Siri features are ready. [Validation details](VALIDATION.md).
 
-## Build
+## Compatibility and boundaries
 
-See:
+- Tested: Apple Silicon, macOS 27.2, KEXT 1.0.2, helper 1.2.0.
+- Build target: arm64e, minimum macOS 27.0. No Intel support or general compatibility guarantee.
+- Requires the diagnostic completion marker from this KEXT; older region-only builds time out rather than trigger a rebuild.
+- Requires the existing ability to load this ad-hoc KEXT. The helper does not configure startup security, SIP, AMFI or authenticated root.
+- A protected daemon may reject SIGTERM or its implementation may change on another OS build; the helper records failure and stops.
+- `resetInput` is not implemented as a soft-refresh fallback: a single current-build request was rejected for a missing private entitlement; static analysis also excludes the device-region input from that request's allowed set. No permission bypass is included.
 
-[BUILD.md](BUILD.md)
-
-## Install
-
-See:
-
-[INSTALL.md](INSTALL.md)
-
-## Uninstall / restore normal security
-
-See:
-
-[UNINSTALL.md](UNINSTALL.md)
-
-## Version compatibility
-
-Validated:
-
-```text
-macOS 26.6.2
-Build 25G83
-Apple M5 Pro
-Mac17,9
-```
-
-No guarantee is made for:
-
-- future macOS 26.x releases
-- macOS 27 or later
-- other Apple Silicon generations
-- Intel Macs
-
-Apple may change eligibility logic, Kernel Extension Management, AuxKC behavior, or the meaning of these properties at any time.
-
-## Disclaimer
-
-**This is an unofficial research and experimentation project.**
-
-It is not affiliated with, endorsed by, sponsored by, or supported by Apple Inc.
-
-Kernel extensions execute with kernel privileges. Changing macOS startup-security or System Integrity Protection settings weakens important security protections and may increase the impact of malicious or defective kernel software.
-
-Using this project may result in:
-
-- reduced system security
-- kernel panic or system instability
-- failure to boot
-- incompatibility with future macOS releases
-- loss of Apple Intelligence functionality after an update
-- data loss
-- unexpected behavior from Apple services
-- violation of applicable organizational security policies
-
-No representation is made that using this project makes a device eligible for any Apple service under Apple's terms, policies, account requirements, or regional regulations.
-
-Users are solely responsible for:
-
-- understanding the security implications
-- complying with applicable laws and service terms
-- maintaining backups
-- deciding whether reduced security is acceptable
-- restoring the original security configuration when appropriate
-
-This software is provided **"AS IS"**, without warranty of any kind.
-
-Apple, macOS, Apple Intelligence, Siri, MacBook Pro and related names and trademarks are property of Apple Inc.
+Historical region-only behavior is preserved in the previous Git tag. See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT; see [LICENSE](LICENSE). This is unofficial experimental software, not affiliated with Apple. Kernel code and reduced startup security carry material risk; see [SECURITY.md](SECURITY.md).

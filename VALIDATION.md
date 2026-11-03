@@ -1,275 +1,44 @@
-# Validation Record
+# Validation: v1.2.0
 
-## Purpose
+## Scope
 
-This validation was designed as a single-variable A/B test.
+Validated on one Apple Silicon Mac with macOS 27.2 (26B123), KEXT 1.0.2 and helper 1.2.0. This file contains only an aggregate summary; no local log dumps, process IDs, boot UUIDs, serial numbers, account records or private workspace paths are included.
 
-The hypothesis:
+## Causal observations
 
-> Is `region-info = CH/A` itself sufficient to produce the mainland-China device-region eligibility result?
+- In an earlier boot, eligibility region-input initialization preceded the KEXT write by approximately 290 ms.
+- The runtime IORegistry later showed LL/A while the original service still rejected device-region qualification.
+- After one SIGTERM and demand-start notification, a new service process accepted device-region qualification.
+- This supports stale input state in the original process. The exact cache layer was not established by live-memory inspection.
 
-Only `region-info` was changed.
+## Cold-boot observations
 
-## Test platform
+| Metric | Helper 1.1.0 | Helper 1.2.0 |
+|---|---:|---:|
+| Boot to confirmed eligibility | 69.342 s | 15.564 s |
+| Fixed settle delay | 20 s | 0 s |
+| Readiness detection after helper started | Not separately measured | 0.230 s |
+| Readiness to starting rebuild | Not separately measured | 0.115 s |
+| Helper total elapsed | About 60.48 s | 6.720 s |
+| Job runs | 1 | 1 |
+| SIGTERM requests | 1 | 1 |
+| Demand-start notifications | 1 | 1 |
+| Final exit code | 0 | 0 |
 
-```text
-Date:             2026-09-09
-Machine:          MacBook Pro
-Model Identifier: Mac17,9
-SoC:              Apple M5 Pro
-CPU cores:        15
-Memory:           24 GB
-Model Number:     MGDN4CH/A
-macOS:            26.6.2
-Build:            25G83
-```
+In the 1.2.0 boot, the driver was already published when the helper subscribed. That path proceeded immediately after validating the marker. The later-publication callback path has simulated coverage but no separate live-boot observation. Startup throttling, resource load and model availability may change timings.
 
-## Before
+Current post-boot checks confirmed DEVICE_REGION_CODE status 3 and GREYMATTER, FOUNDATION_MODELS, AMERICIUM answers 4. The helper verifies GREYMATTER/device-region qualification; it does not wait for every domain or model download to complete. The recorded early Siri-language input was not yet final at the moment of the helper result and later converged to its passing state.
 
-IORegistry:
+## Automated verification
 
-```text
-country-of-origin = CHN
-region-info       = CH/A
-```
+29 local tests passed: 16 flow tests, 7 readiness/marker tests, 6 installer tests. Coverage includes per-boot deduplication, no fixed delay, callback delivery and cleanup, existing services after subscription, incomplete markers, changing service instances, unverified PIDs, signal refusal, qualification timeouts and upgrades from the three prior helper versions.
 
-Relevant eligibility result:
+The KEXT build and strict ad-hoc signature checks are separate from runtime compatibility. The helper used in the publication matches the cold-boot-validated source; only its publication documentation is generalized.
 
-```text
-DEVICE_REGION_CODE = 2
-```
+## resetInput experiment
 
-Observed domains included:
+One DEVICE_REGION_CODE resetInput request was sent without replacing the service PID. The daemon rejected it for the missing private `com.apple.private.eligibilityd.resetInput` entitlement; inputs and qualification were unchanged. Static analysis also found that device-region input 6 is absent from this build's allowed resetInput mask. The request did not reach the reset operation. This does not establish what an authorized reset of other inputs would do, and no entitlement bypass or private-XPC fallback is included in this release.
 
-```text
-FOUNDATION_MODELS        = 2
-GREYMATTER               = 2
-PERSONAL_QA              = 2
-SIRI_WITH_APP_INTENTS    = 2
-```
+## Limits
 
-## Experimental modification
-
-RegionOnlySpoof wrote only:
-
-```text
-IOPlatformExpertDevice.region-info = LL/A
-```
-
-It did not modify:
-
-```text
-country-of-origin
-```
-
-## After reboot
-
-KEXT:
-
-```text
-com.local.RegionOnlySpoof (1.0.0)
-```
-
-IORegistry:
-
-```text
-country-of-origin = CHN
-region-info       = LL/A
-```
-
-This confirms the experiment retained:
-
-```text
-country-of-origin = CHN
-```
-
-while changing only:
-
-```text
-CH/A -> LL/A
-```
-
-## Eligibility after region spoof
-
-Observed:
-
-```text
-DEVICE_REGION_CODE = 3
-```
-
-Domains:
-
-```text
-FOUNDATION_MODELS     = 4
-PERSONAL_QA           = 4
-SIRI_WITH_APP_INTENTS = 4
-```
-
-This provides evidence that on this machine and build, changing only `region-info` was sufficient to alter `DEVICE_REGION_CODE`.
-
-## GREYMATTER language requirement
-
-Before language alignment:
-
-```text
-Eligible device language: zh-Hans
-Eligible Siri language:   en-US
-
-DEVICE_AND_SIRI_LANGUAGE_MATCH = 2
-GREYMATTER                     = 2
-```
-
-The system language was changed using normal macOS settings to English while Siri remained `en-US`.
-
-After alignment:
-
-```text
-Eligible device languages = ["en"]
-Eligible Siri language     = en-US
-
-DEVICE_AND_SIRI_LANGUAGE_MATCH = 3
-DEVICE_LANGUAGE                 = 3
-SIRI_LANGUAGE                   = 3
-DEVICE_REGION_CODE              = 3
-GENERATIVE_MODEL_SYSTEM         = 3
-```
-
-Result:
-
-```text
-GREYMATTER = 4
-```
-
-## Other domains
-
-After the complete test:
-
-```text
-FOUNDATION_MODELS     = 4
-GREYMATTER            = 4
-PERSONAL_QA           = 4
-SIRI_WITH_APP_INTENTS = 4
-```
-
-## COUNTRY_LOCATION observation
-
-During successful eligibility:
-
-```text
-COUNTRY_LOCATION = 2
-```
-
-remained present.
-
-Nevertheless the domains above returned `4`.
-
-Therefore, on this specific configuration:
-
-```text
-COUNTRY_LOCATION = 2
-```
-
-was not a hard blocker for those tested domains.
-
-This result must not be generalized to other macOS releases.
-
-## Runtime service validation
-
-Both processes were active:
-
-```text
-generativeexperiencesd
-modelcatalogd
-```
-
-The GenerativeExperiences availability reporter logged an effective state equivalent to:
-
-```text
-appleIntelligenceUseCase.isDeviceEligible = true
-
-appleIntelligenceDiffusionUseCase.isDeviceEligible = true
-
-isAppleIntelligenceToggleEnabled = true
-
-languages = ["en"]
-```
-
-## Cloud feature access
-
-The system reported access to:
-
-```text
-cloud.llm
-ai.paperkit.image-generation
-ai.keyboard.emoji-generation
-ai.apps.image-playground
-```
-
-Image Playground specifically reported a usable feature state.
-
-## Network-country observation
-
-During this validation, `countryd` reported:
-
-```text
-JP
-```
-
-from GeoIP.
-
-The ChatGPT partner availability path reported:
-
-```text
-isDisabled = false
-```
-
-This project did not modify GeoIP or `countryd`.
-
-## Model asset state
-
-At one stage immediately after eligibility became active, `modelcatalogd` reported that no underlying model-catalog assets had yet been installed.
-
-This was interpreted as a model delivery / initialization state rather than an eligibility failure because the runtime simultaneously reported:
-
-```text
-isDeviceEligible = true
-isAppleIntelligenceToggleEnabled = true
-```
-
-## Conclusion
-
-Validated on:
-
-```text
-Mac17,9
-Apple M5 Pro
-MGDN4CH/A
-macOS 26.6.2
-25G83
-```
-
-the following single runtime change:
-
-```text
-region-info:
-CH/A -> LL/A
-```
-
-while leaving:
-
-```text
-country-of-origin = CHN
-```
-
-was sufficient to produce:
-
-```text
-DEVICE_REGION_CODE:
-2 -> 3
-```
-
-and corresponding eligibility-domain changes.
-
-This is an empirical result for one machine and one OS build.
-
-It is not a guarantee for any other system.
+Each helper version has one timing observation, not a benchmark distribution. Eligibility passing does not prove fully downloaded models, Siri readiness, service-policy authorization or portability to another OS/hardware configuration. Historical single-property tests belong to the previous release tag and must not be confused with the two-property KEXT in this release.

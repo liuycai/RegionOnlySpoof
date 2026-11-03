@@ -1,192 +1,33 @@
-# Security Policy and Risk Disclosure
+# Security and operational scope
 
-## This software runs in the kernel
+## KEXT prerequisites
 
-RegionOnlySpoof is a macOS kernel extension.
+The KEXT runs in the kernel and is ad-hoc signed, without an identified Developer ID KEXT certificate. Loading it on Apple Silicon requires a separately configured Reduced Security/custom SIP environment and user approval. This weakens protections and can increase the consequences of bugs or malicious software. This release neither sets nor further reduces startup security, SIP, AMFI or authenticated-root protections.
 
-A KEXT executes with extremely high privileges.
+Inspect and build the source locally. A successful build or ad-hoc signature verification does not mean Apple endorses or permits the extension under default settings. Do not disable additional protections as an error-handling step. Keep backups and a tested Recovery path; kernel defects can cause panics, boot failure or data loss.
 
-A defect in kernel code can potentially:
+## Current writes and service actions
 
-- panic the kernel
-- corrupt kernel memory
-- crash the operating system
-- prevent normal startup
-- expose sensitive system state
-- increase the impact of another vulnerability
+KEXT 1.0.2 writes exactly these provider properties:
 
-This project is intentionally very small to reduce attack surface, but small code size does not eliminate kernel risk.
+- `region-info`: a 32-byte LL/A payload.
+- `country-of-origin`: USA.
+- `RegionOnlySpoofTiming`: initialization timing/write-result diagnostics, including the original region/origin properties.
 
-## macOS security must be weakened
+These are volatile runtime writes, not firmware changes. The stop method does not restore them; rebooting without the extension is the restoration boundary.
 
-Apple Silicon Macs normally prevent an ad-hoc KEXT like this from loading.
+The optional helper runs as root, checks the exact daemon path and stable PID, and uses a root-owned state directory, lock and atomic state writes. It sends at most one direct SIGTERM per boot, then at most one registered demand-start notification if necessary. Repeated invocation cannot repeatedly signal the daemon. The helper exits after bounded observation rather than running continuously. Unknown existing installation files are refused.
 
-The validated experiment required Reduced Security and a custom partial SIP configuration.
+No direct edits are made to Apple's qualification databases, system LaunchDaemon files, language, account, network, DNS, hosts, proxy or FeatureFlags settings. The project does not inject into protected processes, forge private entitlements, patch eligibilityd or include a resetInput permission bypass.
 
-On the tested macOS 26.6.2 system, after running:
+## Data and publication
 
-```bash
-csrutil enable --without kext
-```
+Local state and logs contain boot UUIDs, process IDs and selected qualification inputs. Review and redact them before sharing. Do not upload raw cloud-feature authorization caches: these can contain account identifiers and signed tokens. The repository and release omit per-machine diagnostic dumps and the local resetInput probe executable.
 
-`csrutil status` reported:
+Package checksums detect an accidental mismatch between bundled helper/plist and their manifest; they are not an independent publisher signature. Review code and use a trusted repository/release channel. The KEXT remains ad-hoc signed.
 
-```text
-Kext Signing: disabled
-Kernel Integrity Protections: disabled
-Filesystem Protections: enabled
-Authenticated Root Requirement: enabled
-```
+## Compatibility
 
-This lowers multiple kernel-related protections, beyond permitting a single third-party KEXT, and materially weakens the default macOS security state.
+This is an unofficial experiment. Apple's daemon interfaces, qualification logic, KEXT management and private implementation details can change with updates. One tested machine/build is not evidence of compatibility with all devices, security policies or future releases. Managed endpoints may prohibit these changes. The project is not affiliated with or supported by Apple and does not establish entitlement to Apple services under account, regional or contractual rules.
 
-The resulting SIP flags may differ across macOS versions. Always verify the actual state after changing the security policy:
-
-```bash
-csrutil status
-csrutil authenticated-root status
-```
-
-## Ad-hoc signature clarification
-
-RegionOnlySpoof is ad-hoc signed. The validated KEXT reported:
-
-```text
-Signature=adhoc
-TeamIdentifier=not set
-```
-
-The Startup Security Utility option:
-
-```text
-Allow user management of kernel extensions from identified developers
-```
-
-is Apple's UI wording. It does not mean RegionOnlySpoof carries an identified Developer ID KEXT certificate.
-
-## Security boundaries this project does not require disabling
-
-The validated configuration did not require:
-
-```text
-Authenticated Root = disabled
-AMFI = disabled
-Permissive Security
-arbitrary boot-arg code-signing bypasses
-```
-
-Do not disable additional protections merely to make this project load.
-
-If macOS rejects the KEXT on a future version, assume compatibility has changed until proven otherwise.
-
-## Scope of the source
-
-The intended source performs one relevant mutation:
-
-```cpp
-provider->setProperty("region-info", regionData);
-```
-
-The project intentionally does not modify:
-
-```text
-country-of-origin
-eligibility.plist
-countryd
-GeoServices
-Siri
-AppleInternalVariant
-FeatureFlags
-DNS
-hosts
-proxy configuration
-```
-
-Users should inspect the source themselves before building or installing it.
-
-## Binary trust
-
-Do not install an unknown precompiled copy of this KEXT from an untrusted third party.
-
-The preferred security model for this experiment is:
-
-```text
-inspect source
--> build locally
--> inspect binary
--> ad-hoc sign locally
--> install your own build
-```
-
-## Verification
-
-Useful checks include:
-
-```bash
-grep -R -n 'setProperty' src
-```
-
-and:
-
-```bash
-grep -R -n -E \
-'country-of-origin|eligibility|countryd|GeoServices|Siri|AppleInternal|FeatureFlags|hosts|proxy|DNS' \
-src
-```
-
-The latter should return no matches for the minimal implementation.
-
-## System updates
-
-macOS updates may change:
-
-- KEXT authentication
-- Auxiliary Kernel Collection behavior
-- Kernel ABI/API compatibility
-- IOKit matching
-- eligibility logic
-- Apple Intelligence availability logic
-- interpretation of `region-info`
-
-Do not assume a build validated on one macOS release is safe or functional on another.
-
-Major macOS upgrades should be treated as a new validation target.
-
-## Corporate systems
-
-This project is generally inappropriate for managed corporate endpoints that require:
-
-- standard SIP
-- Full Security
-- endpoint compliance enforcement
-- security certification
-- kernel-extension restrictions
-
-Consult your organization's security policy.
-
-## Vulnerability reporting
-
-If you discover a bug in RegionOnlySpoof itself, open a GitHub issue without posting private information, credentials, machine identifiers or sensitive logs.
-
-For vulnerabilities in macOS or Apple services, use Apple's official security reporting channels.
-
-## Disclaimer
-
-This repository is an independent research project.
-
-It is not affiliated with, endorsed by, sponsored by, or supported by Apple Inc.
-
-The software is provided "AS IS", without warranty.
-
-The authors and contributors are not responsible for:
-
-- system damage
-- data loss
-- security incidents
-- account restrictions
-- service unavailability
-- compliance issues
-- software incompatibility
-- changes introduced by Apple
-
-Use entirely at your own risk.
+Report project bugs without publishing credentials, machine identifiers or raw sensitive logs. Use Apple's official reporting channels for macOS security issues. MIT warranty/disclaimer terms are in [LICENSE](LICENSE).

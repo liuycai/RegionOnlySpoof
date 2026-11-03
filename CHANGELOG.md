@@ -2,6 +2,16 @@
 
 All notable changes to RegionOnlySpoof will be documented here.
 
+## [1.2.0] - 2026-11-03
+
+- Publish the event-readiness helper 1.2.0 and completion-marker KEXT 1.0.2 as one solution release; component versions are intentionally distinct.
+- KEXT now writes both region-info=LL/A and country-of-origin=USA and publishes initialization diagnostics. This supersedes the earlier single-property source scope.
+- Subscribe to IOKit service publication, validate the completion marker, and handle an already-published driver immediately; remove fixed 20-second waiting and kmutil polling.
+- Add root-managed install/status/uninstall, isolated Python execution, per-boot locking/checkpointing, process identity checks, one SIGTERM maximum and bounded demand-start verification.
+- Include 29 regression tests, guarded KEXT backup/restore instructions, a local build script and aggregate macOS 27.2 validation.
+- Observed 15.564-second boot-to-qualification time versus a separate 69.342-second 1.1.0 observation. These are single-machine observations, not timing guarantees.
+- Preserve qualification/model-readiness distinctions and document that resetInput was rejected; no private permission bypass or raw local diagnostics are published.
+
 ## [1.0.1] - 2026-09-09
 
 ### Documentation-only security clarification

@@ -1,320 +1,69 @@
 # Installation
 
-## WARNING
+Read [SECURITY.md](SECURITY.md). This release does not change startup-security settings. Loading an ad-hoc KEXT on Apple Silicon requires a separately configured and approved environment. Do not disable additional protections to work around an unexplained error.
 
-Read `SECURITY.md` first.
+## KEXT 1.0.2
 
-RegionOnlySpoof is a legacy kernel extension.
+Build with `bash build.sh`, or inspect the release bundle against the source and SHA256SUMS. Existing users already running KEXT 1.0.2 with the completion marker can skip this section.
 
-Loading an ad-hoc KEXT on Apple Silicon may require weakening macOS startup security and KEXT-signing protections.
-
-Do not continue unless you understand this trade-off.
-
-## 1. Check the original device properties
-
-Before installation:
+Keep a backup before replacing an existing KEXT. The following guarded block stages the new bundle, preserves an existing bundle at a fixed backup path, and requests macOS loading/approval. It stops if a previous staging or backup path exists. Run from this repository root:
 
 ```bash
-ioreg -rd1 -c IOPlatformExpertDevice | \
-grep -Ei '"region-info"|"country-of-origin"'
+sudo /bin/bash <<'SH'
+set -euo pipefail
+source_bundle="$PWD/build/RegionOnlySpoof.kext"
+backup=/Library/Extensions/.RegionOnlySpoof-before-v1.2.0.rollback
+staged=/Library/Extensions/.RegionOnlySpoof-v1.2.0.stage
+test -d "$source_bundle"
+test ! -e "$backup"
+test ! -e "$staged"
+/usr/bin/codesign --verify --strict "$source_bundle"
+/usr/bin/ditto "$source_bundle" "$staged"
+/usr/sbin/chown -R root:wheel "$staged"
+if test -e /Library/Extensions/RegionOnlySpoof.kext; then
+  /bin/mv /Library/Extensions/RegionOnlySpoof.kext "$backup"
+fi
+/bin/mv "$staged" /Library/Extensions/RegionOnlySpoof.kext
+/usr/bin/kmutil load -p /Library/Extensions/RegionOnlySpoof.kext
+SH
 ```
 
-A mainland-China unit may report:
+A load request can return an approval/restart-required result even after the files have been installed. Follow macOS's approval and restart prompts. Do not keep rerunning the block: it deliberately refuses an existing backup. If approval fails, retain the backup and follow the KEXT rollback steps in [UNINSTALL.md](UNINSTALL.md).
 
-```text
-"country-of-origin" = <"CHN">
-"region-info" = <43482f4100...>
-```
-
-`43 48 2f 41` is ASCII:
-
-```text
-CH/A
-```
-
-## 2. Keep a security baseline
+After the required restart:
 
 ```bash
-csrutil status
-csrutil authenticated-root status
-nvram boot-args
+kmutil showloaded --list-only --bundle-identifier com.local.RegionOnlySpoof
+/usr/bin/python3 -I autorefresh/helper.py --wait-ready 2
 ```
 
-Save the output.
+Expected KEXT version is 1.0.2; readiness should report a complete marker and a published service. The original country-of-origin is now changed to USA along with LL/A; this is not the old single-variable experiment.
 
-## 3. Apple Silicon Startup Security
-
-Shut the Mac down completely.
-
-Press and hold the power / Touch ID button until Startup Options appears.
-
-Enter:
-
-```text
-Options
--> Continue
--> Recovery
-```
-
-Open:
-
-```text
-Utilities
--> Startup Security Utility
-```
-
-Select the macOS system volume.
-
-Open:
-
-```text
-Security Policy
-```
-
-Select:
-
-```text
-Reduced Security
-```
-
-and enable:
-
-```text
-Allow user management of kernel extensions from identified developers
-```
-
-This is Apple's UI wording for the Startup Security Utility option. RegionOnlySpoof itself is ad-hoc signed:
-
-```text
-Signature=adhoc
-TeamIdentifier=not set
-```
-
-It does not carry an identified Developer ID KEXT certificate.
-
-Do NOT select Permissive Security.
-
-Do NOT disable authenticated-root protection.
-
-Restart if required.
-
-## 4. Partial SIP configuration
-
-For the validated ad-hoc test configuration, Recovery Terminal used:
+## Helper 1.2.0
 
 ```bash
-csrutil enable --without kext
+sudo /usr/bin/python3 -I autorefresh/setup.py install
+/usr/bin/python3 -I autorefresh/setup.py status
 ```
 
-This creates a custom SIP configuration.
+The helper uses `/usr/bin/python3 -I`, so the system Command Line Tools Python3 must remain available. The installer verifies package hashes and refuses unknown existing destination files. Exact 1.0.0, 1.0.1 and 1.1.0 helper hashes are accepted for upgrade.
 
-On the validated macOS 26.6.2 system, `csrutil status` reported:
+Installed paths:
 
-```text
-Kext Signing: disabled
-Kernel Integrity Protections: disabled
-Filesystem Protections: enabled
-Authenticated Root Requirement: enabled
-```
+- `/Library/LaunchDaemons/com.local.regiononlyspoof.refresh.plist`: root:wheel, 0644.
+- `/Library/PrivilegedHelperTools/com.local.regiononlyspoof.refresh.py`: root:wheel, 0755.
+- `/Library/Application Support/RegionOnlySpoofRefresh/state.json`: per-boot result.
+- `/Library/Logs/RegionOnlySpoofRefresh.log`: output.
 
-Both Kext Signing and Kernel Integrity Protections were disabled, while Filesystem Protections and Authenticated Root Requirement remained enabled. This materially weakens the default macOS security state.
+The job uses RunAtLoad=true, KeepAlive=false, no periodic timer. It checks the boot UUID and persists an attempt before signaling. It never sends more than one SIGTERM per boot, even after an upgrade or repeated invocation. Missing readiness, a changing service instance or an unverified PID prevents signaling. The notification only requests demand-start; it does not alter language settings.
 
-The resulting SIP flags may differ across macOS versions. Always recheck both `csrutil status` and `csrutil authenticated-root status` after changing the security policy or updating macOS.
+`not running` with exit code 0 is the expected final state for this one-shot job. `installedHelperVersion` is the installed file version; `lastRun.helperVersion` can refer to an earlier successful invocation when the current boot was skipped.
 
-After reboot:
+Read-only diagnostics:
 
 ```bash
-csrutil status
+/usr/bin/python3 -I autorefresh/helper.py --check
+/usr/bin/python3 -I autorefresh/helper.py --wait-ready 2
 ```
 
-may display:
-
-```text
-System Integrity Protection status: unknown (Custom Configuration).
-```
-
-and warn that the configuration is unsupported.
-
-This warning is expected for a custom SIP configuration.
-
-Also verify:
-
-```bash
-csrutil authenticated-root status
-```
-
-Expected:
-
-```text
-Authenticated Root status: enabled
-```
-
-### Do not disable additional protections
-
-This project does NOT require you to:
-
-```text
-disable authenticated root
-disable AMFI
-use Permissive Security
-modify boot-args to defeat code signing
-```
-
-If installation fails, diagnose the failure instead of disabling additional protections.
-
-## 5. Copy the KEXT
-
-Assuming the built KEXT is:
-
-```text
-build/RegionOnlySpoof.kext
-```
-
-install:
-
-```bash
-sudo rm -rf \
-  /Library/Extensions/RegionOnlySpoof.kext
-```
-
-```bash
-sudo cp -R \
-  build/RegionOnlySpoof.kext \
-  /Library/Extensions/
-```
-
-Set ownership:
-
-```bash
-sudo chown -R root:wheel \
-  /Library/Extensions/RegionOnlySpoof.kext
-```
-
-Verify:
-
-```bash
-ls -ld \
-  /Library/Extensions/RegionOnlySpoof.kext
-```
-
-## 6. Request loading
-
-```bash
-sudo kmutil load \
-  -p /Library/Extensions/RegionOnlySpoof.kext
-```
-
-macOS may:
-
-- request approval
-- state that the extension will become active after restart
-- require another reboot
-
-Follow macOS's own approval prompts.
-
-## 7. Restart
-
-After macOS says the extension has been applied, reboot.
-
-## 8. Verify that it loaded
-
-```bash
-kmutil showloaded | \
-grep -i RegionOnly
-```
-
-Example successful result:
-
-```text
-com.local.RegionOnlySpoof (1.0.0)
-```
-
-## 9. Verify the single-variable spoof
-
-```bash
-ioreg -rd1 -c IOPlatformExpertDevice | \
-grep -Ei '"region-info"|"country-of-origin"'
-```
-
-Expected:
-
-```text
-"country-of-origin" = <"CHN">
-"region-info" = <4c4c2f410000...>
-```
-
-Hex:
-
-```text
-4c 4c 2f 41
-```
-
-is:
-
-```text
-LL/A
-```
-
-The important test condition is:
-
-```text
-region-info       CH/A -> LL/A
-country-of-origin CHN  -> CHN
-```
-
-## 10. Inspect eligibility
-
-This project does not modify Apple's eligibility database.
-
-You can inspect it:
-
-```bash
-sudo plutil -p \
-  /private/var/db/eligibilityd/eligibility.plist
-```
-
-Relevant values include:
-
-```text
-OS_ELIGIBILITY_INPUT_DEVICE_REGION_CODE
-OS_ELIGIBILITY_DOMAIN_FOUNDATION_MODELS
-OS_ELIGIBILITY_DOMAIN_GREYMATTER
-OS_ELIGIBILITY_DOMAIN_PERSONAL_QA
-OS_ELIGIBILITY_DOMAIN_SIRI_WITH_APP_INTENTS
-```
-
-See `VALIDATION.md`.
-
-## Language configuration
-
-Apple Intelligence may independently require the device language and Siri language to be supported and compatible.
-
-On the validated system:
-
-```text
-Device language: English
-Siri language:   en-US
-```
-
-resulted in:
-
-```text
-DEVICE_AND_SIRI_LANGUAGE_MATCH = 3
-GREYMATTER = 4
-```
-
-Language configuration is performed through normal macOS settings.
-
-This project does not patch Siri.
-
-## No automatic eligibility patching
-
-RegionOnlySpoof intentionally does NOT:
-
-- edit `eligibility.plist`
-- restart system daemons automatically
-- alter `countryd`
-- spoof GeoServices
-- install a LaunchDaemon
-
-This is intentional.
+Do not publish raw local diagnostics without reviewing them. Qualification passing and downloaded/usable models are separate states.
